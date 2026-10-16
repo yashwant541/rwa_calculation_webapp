@@ -1,0 +1,246 @@
+<div id="app">
+  <header class="topbar">
+    <div class="brand" id="brand-home">
+      <span class="brand-mark">&#9635;</span>
+      <span class="brand-text" id="brand-text">RWA Calculation</span>
+    </div>
+    <nav class="topnav">
+      <span class="who" id="who"></span>
+      <button class="link-btn" id="nav-home">Categories</button>
+      <button class="link-btn" id="nav-admin">Admin</button>
+    </nav>
+  </header>
+
+  <main class="content">
+    <!-- ===================== HOME ===================== -->
+    <section id="view-home" class="view">
+      <div class="view-head">
+        <h1>Categories</h1>
+        <p class="muted">Pick a category to upload source data, run its calculation recipe and compare the results.</p>
+      </div>
+      <div id="cat-grid" class="cat-grid"></div>
+    </section>
+
+    <!-- ===================== CATEGORY WORKFLOW ===================== -->
+    <section id="view-category" class="view hidden">
+      <button class="link-btn back" id="cat-back">&larr; All categories</button>
+      <div class="view-head">
+        <h1 id="cat-title">Category</h1>
+        <p class="muted" id="cat-sub"></p>
+      </div>
+
+      <ol class="stepper" id="stepper">
+        <li data-step="1" class="active">Data files</li>
+        <li data-step="2">Select &amp; validate</li>
+        <li data-step="3">Run</li>
+        <li data-step="4">Outputs</li>
+        <li data-step="5">Compare</li>
+        <li data-step="6">Trace</li>
+      </ol>
+
+      <!-- step 1: data + mapping upload -->
+      <div class="step-panel" id="step-1">
+        <h3>Source data files</h3>
+        <p class="muted small">.xlsx, .xlsm, .xlsb or .csv. Upload one or more; you choose which to include in the next step.</p>
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="file-input" multiple hidden accept=".xlsx,.xlsm,.xlsb,.csv">
+          <p><strong>Drop data files here</strong> or <button class="link-btn" id="browse-btn">browse</button></p>
+        </div>
+        <div class="table-wrap"><table id="data-table">
+          <thead><tr><th>File</th><th>Size</th><th>Modified</th><th></th></tr></thead><tbody></tbody></table></div>
+
+        <h3 style="margin-top:22px">Mapping file</h3>
+        <p class="muted small">Exactly one mapping file per category. Uploading replaces the current one.</p>
+        <div id="mapping-current" class="muted small"></div>
+        <div class="row-actions" style="justify-content:flex-start;margin-top:10px">
+          <input type="file" id="mapping-input" accept=".xlsx,.xlsm,.csv" style="max-width:320px">
+          <button class="btn ghost small" id="mapping-upload">Upload / replace mapping</button>
+        </div>
+
+        <div class="row-actions">
+          <button class="btn ghost danger" id="clear-data">Clear all data files</button>
+          <button class="btn" id="to-validate">Select &amp; validate &rarr;</button>
+        </div>
+      </div>
+
+      <!-- step 2: select + validate -->
+      <div class="step-panel hidden" id="step-2">
+        <h3>Choose the files to process</h3>
+        <div class="pick-list" id="pick-list"></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn ghost small" id="pick-all">Select all</button>
+          <button class="btn ghost small" id="pick-none">Clear</button>
+          <button class="btn" id="run-validate">Validate selection</button>
+        </div>
+        <div id="validate-result"></div>
+        <div class="row-actions">
+          <button class="btn ghost" data-goto="1">&larr; Back</button>
+          <button class="btn" id="to-run">Continue to run &rarr;</button>
+        </div>
+      </div>
+
+      <!-- step 3: run -->
+      <div class="step-panel hidden" id="step-3">
+        <h3>Run the calculation recipe</h3>
+        <p class="muted small" id="run-recipe-line"></p>
+        <div id="run-status" class="muted">Ready.</div>
+        <div id="run-result"></div>
+        <div class="row-actions">
+          <button class="btn ghost" data-goto="2">&larr; Back</button>
+          <button class="btn" id="run-go">Run calculation</button>
+          <button class="btn" data-goto="4">See outputs &rarr;</button>
+        </div>
+      </div>
+
+      <!-- step 4: outputs -->
+      <div class="step-panel hidden" id="step-4">
+        <div class="output-cols">
+          <div class="output-card">
+            <h3>Output files</h3>
+            <div class="table-wrap"><table id="output-table"><thead><tr><th>File</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+          <div class="output-card">
+            <h3>Template files</h3>
+            <div class="table-wrap"><table id="template-table"><thead><tr><th>File</th><th></th></tr></thead><tbody></tbody></table></div>
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="btn ghost" data-goto="3">&larr; Back</button>
+          <button class="btn" data-goto="5">Compare &rarr;</button>
+        </div>
+      </div>
+
+      <!-- step 5: compare -->
+      <div class="step-panel hidden" id="step-5">
+        <h3>Compare columns across every output file</h3>
+        <p class="muted small">Pick a left and a right column and how to compare them. A row is a mismatch if any pair disagrees.</p>
+        <div id="cmp-rows"></div>
+        <button class="btn ghost small" id="cmp-add">+ comparison</button>
+        <div class="row-actions" style="justify-content:flex-start;margin-top:12px;align-items:center">
+          <label class="inline-field">Threshold <input type="number" id="cmp-threshold" value="0" min="0" step="any" title="Numeric differences within this threshold are treated as a match"></label>
+          <button class="btn" id="cmp-run">Run comparison</button>
+        </div>
+        <div id="cmp-result"></div>
+        <div class="row-actions">
+          <button class="btn ghost" data-goto="4">&larr; Back</button>
+          <button class="btn" data-goto="6">Open trace &rarr;</button>
+        </div>
+      </div>
+
+      <!-- step 6: trace launcher -->
+      <div class="step-panel hidden" id="step-6">
+        <h3>Deep formula trace</h3>
+        <p class="muted small">Open a produced workbook and walk any row's calculations node by node &mdash; every computed
+          column, the branch each <span class="mono">IF</span> takes, what each <span class="mono">VLOOKUP</span> matched,
+          and the precedents back to the raw inputs.</p>
+        <div class="field" style="max-width:520px">
+          <label>Output file to trace</label>
+          <select id="trace-file"></select>
+        </div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn" id="trace-open">Open trace &rarr;</button>
+        </div>
+        <div id="trace-recent"></div>
+      </div>
+    </section>
+
+    <!-- ===================== TRACE PAGE ===================== -->
+    <section id="view-trace" class="view hidden">
+      <button class="link-btn back" id="trace-back">&larr; Back to category</button>
+      <div class="view-head">
+        <h1 id="trace-title">Trace</h1>
+        <p class="muted" id="trace-sub"></p>
+      </div>
+      <div class="trace-layout">
+        <aside class="trace-rail">
+          <div class="admin-section">
+            <h3>Pick a row</h3>
+            <div class="field"><label>Sheet</label><select id="tr-sheet"></select></div>
+            <div class="field"><label>Row number</label>
+              <input type="text" id="tr-row" inputmode="numeric" placeholder="e.g. 2"></div>
+            <div class="row-actions" style="justify-content:flex-start;margin-top:6px">
+              <button class="btn small" id="tr-go">Show row journey</button>
+            </div>
+          </div>
+          <div class="admin-section" id="tr-mismatch-box">
+            <h3>Mismatch rows</h3>
+            <p class="hint">From the last comparison of this category.</p>
+            <div id="tr-mismatch-list"></div>
+          </div>
+          <div class="admin-section" id="tr-findings-box">
+            <h3>Findings</h3>
+            <div id="tr-findings"></div>
+          </div>
+        </aside>
+        <div class="trace-main">
+          <div id="tr-summary" class="muted small"></div>
+          <div id="tr-journey"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== ADMIN ===================== -->
+    <section id="view-admin" class="view hidden">
+      <button class="link-btn back" id="admin-back">&larr; All categories</button>
+
+      <div id="admin-login" class="card narrow">
+        <h2>Admin sign in</h2>
+        <label>Username <input type="text" id="login-user" autocomplete="username"></label>
+        <label>Password <input type="password" id="login-pass" autocomplete="current-password"></label>
+        <button class="btn" id="login-btn" style="margin-top:14px">Sign in</button>
+        <p class="err" id="login-err"></p>
+      </div>
+
+      <div id="admin-panel" class="hidden">
+        <div class="view-head"><h1>Administration</h1>
+          <p class="muted">Map each category to its managed folders and its calculation recipe. Nothing else to configure &mdash;
+            the recipes live in the Flow and the backend just orchestrates them.</p></div>
+        <div class="admin-tabs" id="admin-tabs"></div>
+        <div id="admin-tab-body"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- trace drawer -->
+  <div id="drawer" class="drawer hidden">
+    <div class="drawer-head">
+      <div>
+        <div id="d-crumbs" class="crumbs"></div>
+        <div class="t-headline">
+          <span id="d-col" class="t-col"></span><span class="t-eq">=</span>
+          <span id="d-val" class="t-val"></span><span id="d-dtype" class="chip dtype"></span>
+        </div>
+        <div id="d-sub" class="muted small"></div>
+      </div>
+      <button class="icon-btn" id="d-close" title="Close" style="font-size:17px">&times;</button>
+    </div>
+    <div id="d-flags" class="flags"></div>
+    <div class="tabs" id="d-tabs">
+      <button data-tab="tree" class="active">Tree</button>
+      <button data-tab="flow">Value flow</button>
+      <button data-tab="explain">Explain</button>
+      <button data-tab="graph">Precedents</button>
+      <button data-tab="source">Source</button>
+    </div>
+    <div class="tab-body">
+      <div id="d-tab-tree" class="tabpane"></div>
+      <div id="d-tab-flow" class="tabpane hidden"></div>
+      <div id="d-tab-explain" class="tabpane hidden"></div>
+      <div id="d-tab-graph" class="tabpane hidden"></div>
+      <div id="d-tab-source" class="tabpane hidden"></div>
+    </div>
+  </div>
+  <div id="drawer-scrim" class="scrim hidden"></div>
+
+  <div class="toast-wrap" id="toast-wrap"></div>
+  <div class="modal-backdrop hidden" id="modal">
+    <div class="modal">
+      <h3 id="modal-title">Confirm</h3>
+      <p id="modal-body"></p>
+      <div class="row-actions">
+        <button class="btn ghost" id="modal-cancel">Cancel</button>
+        <button class="btn danger" id="modal-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
