@@ -23,7 +23,7 @@ rwa-calculation-webapp/
 
 ## What it is
 
-A multipage webapp (Categories → Data → Select & validate → Run → Outputs → Compare →
+A multipage webapp (Categories → Data → Split → Select & validate → Run → Outputs → Compare →
 **Trace** → Admin) that keeps your backend as the **orchestrator** — Admin only maps each
 category to its managed folders and its recipe. The **Trace** pages open a produced
 workbook and let you walk any row's calculations node by node: which `IF` branch fired,

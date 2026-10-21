@@ -3,7 +3,7 @@
 The backend stays your orchestrator. This adds a thin admin layer (folders + recipe
 name/id per category) and the deep formula-trace pages, all in the *Category Formula
 Studio* design system. Multipage, hash-routed:
-**Categories → Category workflow (Data → Select & validate → Run → Outputs → Compare →
+**Categories → Category workflow (Data → Split → Select & validate → Run → Outputs → Compare →
 Trace) → Trace page → Admin**.
 
 ---
@@ -110,13 +110,39 @@ forced to change it).
 **Workflow steps** (all against your existing `/api/*`):
 
 1. **Data files** — drag-drop upload, delete, download; single mapping file with replace.
-2. **Select & validate** — tick the files to process → `/api/validate-inputs`.
-3. **Run** — `/api/run` (triggers the category's Dataiku recipe).
-4. **Outputs** — output + template lists; 🔬 on each `.xlsx` output jumps to the Trace page.
-5. **Compare** — column pairs → `/api/compare-all-outputs`, run over the **template**
+2. **Split** *(optional)* — "Split data? Yes/No". When Yes, every selected input file is
+   split into filtered datasets, one workbook (one sheet) each. Defaults (editable column
+   dropdown + value per dataset): `TRANCHE_COLLATERAL_TYPE = COLLATERIZED`,
+   `TRANCHE_COLLATERAL_TYPE = NOT COLLATERIZED`, `TRANCHE_GUARANTEE_TYPE = GUARANTEED` —
+   so 1 input file → 3 datasets, 2 input files → 6. "Preview row counts" →
+   `/api/split-preview`. Rules are independent filters (a row can be in more than one
+   dataset); matching is case/whitespace-insensitive *equality*.
+3. **Select & validate** — tick the files to process → `/api/validate-inputs` (also checks
+   the split columns exist when Split is on).
+4. **Run** — `/api/run` (triggers the category's Dataiku recipe).
+5. **Outputs** — output + template lists; 🔬 on each `.xlsx` output jumps to the Trace page.
+6. **Compare** — column pairs → `/api/compare-all-outputs`, run over the **template**
    folder workbooks (live formulas). Shows `Compared from: template folder` and any
    *"no cached values"* warnings. "Trace mismatched rows →" opens the template workbook.
-6. **Trace** — pick a `.xlsx` → the Trace page (defaults to the **template** folder).
+   The **Threshold** box: numeric differences within it count as a match.
+7. **Trace** — pick a `.xlsx` → the Trace page (defaults to the **template** folder).
+
+### Split — what the recipe receives
+
+At **Run**, when Split is Yes, the backend validates the original files, writes the split
+workbooks to `<data folder>/_webapp_metadata/split/<source>__<DATASET>.xlsx` (replacing the
+previous run's), and writes `_webapp_metadata/selected_inputs.json` so that:
+
+* `selected_paths` = the **split files** (what the recipe should process, as before);
+* `source_paths` = the original uploads;
+* `split.datasets[]` = per file `{path, filename, source_path, split_name, column, value,
+  row_count}` — use `split_name` if the recipe has to treat COLLATERIZED / NOT COLLATERIZED /
+  GUARANTEED differently;
+* empty datasets are skipped (and reported), not written.
+
+With Split = No the manifest is exactly as before. Per-category defaults can be set in
+`CATEGORY_CONFIG` with `"split_enabled": True` and/or `"split_rules": [{"name", "column",
+"value"}, ...]`; the logic lives in `python-lib/webapp_core/split.py`.
 
 **Trace page** — opens the workbook, then:
 

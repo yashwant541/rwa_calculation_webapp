@@ -47,6 +47,7 @@ import dataiku
 from flask import request, jsonify, Response, stream_with_context
 
 from excel_deep_trace import ExcelDeepTraceEngine
+from webapp_core import split as split_core
 
 
 # =============================================================================
@@ -2448,8 +2449,13 @@ def compare_all_category_outputs(category, raw_rules, threshold=0.0):
 # RECIPE SELECTION MANIFEST
 # =============================================================================
 
-def write_selection_manifest(category, selected_paths, run_id):
-    """Persist the exact UI selection so the Python Recipe processes only those files."""
+def write_selection_manifest(category, selected_paths, run_id, split_result=None):
+    """Persist the exact UI selection so the Python Recipe processes only those files.
+
+    When the data was split, ``selected_paths`` lists the split datasets (the files the
+    recipe should process), ``source_paths`` the original uploads, and ``datasets`` tags
+    every split file with its rule so the recipe can process each type accordingly.
+    """
     category_key, config = get_category_config(category)
     data_folder = get_folder(category_key, "data")
     existing_paths = {
@@ -2471,8 +2477,155 @@ def write_selection_manifest(category, selected_paths, run_id):
         "selected_paths": normalized,
         "created_at": utc_now_iso()
     }
+    if split_result:
+        manifest["source_paths"] = normalized
+        manifest["selected_paths"] = [d["path"] for d in split_result["datasets"]]
+        manifest["split"] = {
+            "enabled": True,
+            "rules": split_result["rules"],
+            "datasets": split_result["datasets"]
+        }
     write_json_to_folder(data_folder, SELECTION_MANIFEST_FILE, manifest)
     return manifest
+
+
+# =============================================================================
+# DATA SPLIT (optional step between upload and validation)
+# =============================================================================
+
+SPLIT_DIRECTORY = METADATA_DIRECTORY + "/split"
+
+
+def get_split_defaults(config):
+    return [dict(rule) for rule in (config.get("split_rules") or split_core.DEFAULT_SPLIT_RULES)]
+
+
+def parse_split_request(category, split_payload):
+    """Return validated rules when the UI asked for a split, else None."""
+    if not split_payload or not split_payload.get("enabled"):
+        return None
+    category_key, config = get_category_config(category)
+    return split_core.clean_rules(
+        split_payload.get("rules") or get_split_defaults(config),
+        standardize_column_name
+    )
+
+
+def read_split_source(category, path):
+    category_key, config = get_category_config(category)
+    folder = get_folder(category_key, "data")
+    normalized_path = normalize_folder_path(path)
+    filename = os.path.basename(normalized_path)
+    validate_extension(filename, ALLOWED_DATA_EXTENSIONS)
+    frame = read_tabular_content(
+        read_managed_folder_file(folder, normalized_path),
+        filename,
+        expected_columns=config.get("required_input_columns", [])
+    )
+    return normalized_path, filename, frame
+
+
+def preview_split(category, selected_paths, rules):
+    """Columns available for splitting plus the row count each rule would produce."""
+    category_key, config = get_category_config(category)
+    folder = get_folder(category_key, "data")
+    paths = list(selected_paths or [])
+    if not paths:
+        paths = [
+            item["path"]
+            for item in list_folder_files(folder, ALLOWED_DATA_EXTENSIONS)
+        ]
+
+    columns = []
+    files = []
+    missing = set()
+
+    for path in paths:
+        try:
+            normalized_path, filename, frame = read_split_source(category_key, path)
+        except Exception as exc:
+            files.append({"path": path, "filename": os.path.basename(str(path)), "error": str(exc)})
+            continue
+
+        for column in frame.columns:
+            if column not in columns:
+                columns.append(column)
+
+        record = {"path": normalized_path, "filename": filename, "rows": int(len(frame))}
+        if rules:
+            gone = split_core.missing_columns(frame, rules)
+            missing.update(gone)
+            record["datasets"] = [
+                {
+                    "name": rule["name"],
+                    "rows": (
+                        None if rule["column"] in gone
+                        else int(len(split_core.filter_frame(frame, rule)))
+                    )
+                }
+                for rule in rules
+            ]
+        files.append(record)
+
+    return {
+        "columns": columns,
+        "files": files,
+        "missing_columns": sorted(missing)
+    }
+
+
+def clear_split_files(category):
+    folder = get_folder(category, "data")
+    prefix = "/" + SPLIT_DIRECTORY + "/"
+    for raw_path in folder.list_paths_in_partition():
+        if normalize_folder_path(raw_path).startswith(prefix):
+            folder.delete_path(raw_path)
+
+
+def run_split(category, selected_paths, rules, run_id):
+    """Write one single-sheet workbook per (input file, rule) and describe them."""
+    category_key, config = get_category_config(category)
+    folder = get_folder(category_key, "data")
+    clear_split_files(category_key)
+
+    datasets = []
+    skipped = []
+
+    for path in selected_paths:
+        source_path, source_name, frame = read_split_source(category_key, path)
+
+        for rule, subset in split_core.split_frame(frame, rules):
+            if subset.empty:
+                skipped.append(
+                    "{}: no rows where {} = '{}' ({} dataset skipped).".format(
+                        source_name, rule["column"], rule["value"], rule["name"]
+                    )
+                )
+                continue
+
+            split_name = split_core.split_file_name(source_name, rule)
+            split_path = "/{}/{}".format(SPLIT_DIRECTORY, split_name)
+            folder.upload_stream(
+                split_path,
+                io.BytesIO(split_core.frame_to_xlsx_bytes(subset, rule["name"]))
+            )
+            datasets.append({
+                "path": split_path,
+                "filename": split_name,
+                "source_path": source_path,
+                "source_filename": source_name,
+                "split_name": rule["name"],
+                "column": rule["column"],
+                "value": rule["value"],
+                "row_count": int(len(subset))
+            })
+
+    if not datasets:
+        raise ValueError(
+            "The split produced no rows for any dataset. " + " ".join(skipped)
+        )
+
+    return {"rules": rules, "datasets": datasets, "skipped": skipped, "run_id": run_id}
 
 # =============================================================================
 # DATAIKU RECIPE ORCHESTRATION
@@ -2553,7 +2706,7 @@ def changed_artifacts(before, after):
     return produced
 
 
-def run_category_recipe(category, selected_paths, run_id):
+def run_category_recipe(category, selected_paths, run_id, split_rules=None):
     category_key, config, recipe = get_configured_recipe(category)
 
     # Validate only the files selected in the UI before starting the category recipe.
@@ -2564,11 +2717,20 @@ def run_category_recipe(category, selected_paths, run_id):
             .format(" ".join(validation["errors"]))
         )
 
+    split_result = None
+    if split_rules:
+        split_result = run_split(
+            category_key,
+            selected_paths,
+            split_rules,
+            run_id
+        )
 
     selection_manifest = write_selection_manifest(
         category_key,
         selected_paths,
-        run_id
+        run_id,
+        split_result
     )
     before = snapshot_recipe_artifacts(category_key)
     started_at = utc_now_iso()
@@ -2593,6 +2755,7 @@ def run_category_recipe(category, selected_paths, run_id):
         "execution": execution,
         "validation": validation,
         "selection_manifest": selection_manifest,
+        "split": split_result,
         "produced_files": produced_files,
         "all_output_files": list(after.get("output", {}).values()),
         "all_template_files": list(after.get("template", {}).values())
@@ -2625,6 +2788,8 @@ def api_categories():
                 "template_file_count": 0,
                 "mapping_status": "MISSING",
                 "recipe_configured": not is_placeholder(config.get("recipe_id")),
+                "split_enabled": bool(config.get("split_enabled", False)),
+                "split_rules": get_split_defaults(config),
                 "status": "NOT_READY"
             }
 
@@ -3033,6 +3198,37 @@ def api_download_file():
         )
 
 
+@app.route("/api/split-preview", methods=["POST"])
+def api_split_preview():
+    try:
+        payload = request.get_json(force=True) or {}
+        category_key, config = get_category_config(payload.get("category"))
+
+        rules = None
+        rules_error = None
+        if payload.get("rules"):
+            try:
+                rules = split_core.clean_rules(payload["rules"], standardize_column_name)
+            except ValueError as exc:
+                rules_error = str(exc)
+
+        preview = preview_split(
+            category_key,
+            payload.get("selected_paths") or [],
+            rules
+        )
+        preview["rules_error"] = rules_error
+
+        return success_response(data=preview)
+
+    except Exception as exc:
+        return error_response(
+            "Unable to preview the split.",
+            details=str(exc),
+            status_code=400
+        )
+
+
 @app.route("/api/validate-inputs", methods=["POST"])
 def api_validate_inputs():
     try:
@@ -3050,6 +3246,20 @@ def api_validate_inputs():
             category_key,
             selected_paths
         )
+
+        if (payload.get("split") or {}).get("enabled"):
+            try:
+                split_rules = parse_split_request(category_key, payload.get("split"))
+                preview = preview_split(category_key, selected_paths, split_rules)
+                validation["split_preview"] = preview
+                if preview["missing_columns"]:
+                    validation["errors"].append(
+                        "Split column(s) not found in the selected files: {}."
+                        .format(", ".join(preview["missing_columns"]))
+                    )
+            except ValueError as split_error:
+                validation["errors"].append(str(split_error))
+            validation["valid"] = len(validation["errors"]) == 0
 
         append_audit_log(
             category_key,
@@ -3097,7 +3307,11 @@ def api_run_calculation():
         if not selected_paths:
             raise ValueError("Select at least one input data file.")
 
-        result = run_category_recipe(category_key, selected_paths, run_id)
+        split_rules = parse_split_request(category_key, payload.get("split"))
+
+        result = run_category_recipe(
+            category_key, selected_paths, run_id, split_rules
+        )
         produced_files = result.get("produced_files", [])
         primary_outputs = [
             item for item in produced_files
@@ -3131,7 +3345,8 @@ def api_run_calculation():
             "output_folder_type": output_folder_type,
             "produced_files": produced_files,
             "execution": result["execution"],
-            "selection_manifest": result["selection_manifest"]
+            "selection_manifest": result["selection_manifest"],
+            "split": result.get("split")
         }
 
         append_run_history(category_key, run_summary)

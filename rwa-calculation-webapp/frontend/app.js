@@ -145,6 +145,12 @@
       $("#cat-title").textContent = CUR.display_name || key;
       $("#cat-sub").textContent = CUR.description || "";
     } catch (e) { toast(e.message, "err"); }
+    SPLIT = {
+      enabled: !!CUR.split_enabled,
+      rules: (CUR.split_rules || []).map((r) => Object.assign({}, r)),
+      defaults: (CUR.split_rules || []).map((r) => Object.assign({}, r)),
+      columns: [],
+    };
     setStep(1);
     refreshData();
   }
@@ -157,10 +163,78 @@
     });
     $$(".step-panel").forEach((p) => p.classList.add("hidden"));
     $("#step-" + n).classList.remove("hidden");
-    if (n === 2) renderPick();
-    if (n === 4) refreshOutputs();
-    if (n === 5) renderCompare();
-    if (n === 6) renderTraceLauncher();
+    if (n === 2) renderSplit();
+    if (n === 3) renderPick();
+    if (n === 5) refreshOutputs();
+    if (n === 6) renderCompare();
+    if (n === 7) renderTraceLauncher();
+  }
+
+  // ---- step 2: split
+  let SPLIT = { enabled: false, rules: [], defaults: [], columns: [] };
+  const splitPayload = () => SPLIT.enabled
+    ? { enabled: true, rules: SPLIT.rules.map((r) => ({ name: r.name, column: r.column, value: r.value })) }
+    : { enabled: false };
+
+  async function renderSplit() {
+    $("#split-enabled").value = SPLIT.enabled ? "yes" : "no";
+    $("#split-body").classList.toggle("hidden", !SPLIT.enabled);
+    $("#split-preview-result").innerHTML = "";
+    if (!SPLIT.enabled) return;
+    drawSplitRules();
+    await loadSplitColumns();
+  }
+
+  async function loadSplitColumns() {
+    try {
+      const r = await call("/api/split-preview", { method: "POST", json: { category: CUR.key, selected_paths: [...PICK] } });
+      SPLIT.columns = D(r).columns || [];
+    } catch (e) { SPLIT.columns = []; toast(e.message, "err"); }
+    drawSplitRules();
+  }
+
+  function drawSplitRules() {
+    const box = $("#split-rules"); box.innerHTML = "";
+    SPLIT.rules.forEach((rule) => {
+      const col = el("select", {});
+      const cols = SPLIT.columns.slice();
+      if (rule.column && cols.indexOf(rule.column) < 0) cols.unshift(rule.column);
+      cols.forEach((c) => col.appendChild(el("option", { value: c, text: c })));
+      col.value = rule.column;
+      col.addEventListener("change", () => { rule.column = col.value; });
+      const val = el("input", { type: "text", value: rule.value || "", placeholder: "value to keep" });
+      val.addEventListener("input", () => { rule.value = val.value; });
+      const missing = SPLIT.columns.length && SPLIT.columns.indexOf(rule.column) < 0;
+      box.appendChild(el("div", { class: "split-row" }, [
+        el("div", {}, [el("label", { text: "dataset" }), el("div", { class: "split-name", text: rule.name })]),
+        el("div", {}, [el("label", { text: "column" }), col]),
+        el("div", {}, [el("label", { text: "value equals" }), val]),
+        missing ? el("div", { class: "split-warn", text: "column not in the data files" }) : null,
+      ]));
+    });
+  }
+
+  async function previewSplit() {
+    const box = $("#split-preview-result");
+    box.innerHTML = "<p class='muted'>Counting rows…</p>";
+    try {
+      const r = await call("/api/split-preview", { method: "POST", json: {
+        category: CUR.key, selected_paths: [...PICK], rules: splitPayload().rules } });
+      const d = D(r);
+      box.innerHTML = "";
+      if (d.rules_error) return box.appendChild(el("div", { class: "warnbox", text: "⚠ " + d.rules_error }));
+      if (d.missing_columns.length) box.appendChild(el("div", { class: "warnbox", text: "⚠ Column(s) not found: " + d.missing_columns.join(", ") }));
+      const head = el("tr", {}, [el("th", { text: "File" }), el("th", { text: "Rows" })]
+        .concat(SPLIT.rules.map((r) => el("th", { text: r.name }))));
+      const tb = el("tbody", {});
+      (d.files || []).forEach((f) => {
+        if (f.error) return tb.appendChild(el("tr", {}, [el("td", { text: f.filename }), el("td", { class: "err", colspan: SPLIT.rules.length + 1, text: f.error })]));
+        tb.appendChild(el("tr", {}, [el("td", { text: f.filename }), el("td", { class: "num", text: f.rows })]
+          .concat((f.datasets || []).map((x) => el("td", { class: "num", text: x.rows == null ? "—" : x.rows })))));
+      });
+      box.appendChild(el("div", { class: "table-wrap" }, [el("table", {}, [el("thead", {}, [head]), tb])]));
+      box.appendChild(el("p", { class: "muted small", text: PICK.size ? "Counts for the files you selected." : "Counts for all uploaded data files (the files are chosen in the next step)." }));
+    } catch (e) { box.innerHTML = "<div class='errbox'>" + e.message + "</div>"; }
   }
 
   function dl(folderType, path) {
@@ -256,7 +330,7 @@
     if (!PICK.size) return toast("Select at least one file", "err");
     box.innerHTML = "<p class='muted'>Validating…</p>";
     try {
-      const r = await call("/api/validate-inputs", { method: "POST", json: { category: CUR.key, selected_paths: [...PICK] } });
+      const r = await call("/api/validate-inputs", { method: "POST", json: { category: CUR.key, selected_paths: [...PICK], split: splitPayload() } });
       const v = D(r);
       box.innerHTML = "";
       box.appendChild(el("div", { class: v.valid ? "okbox" : "errbox", text: v.valid ? "Validation passed." : "Validation found problems." }));
@@ -268,6 +342,10 @@
       ]);
       box.appendChild(kv);
       (v.errors || []).forEach((e) => box.appendChild(el("div", { class: "warnbox", text: "⚠ " + e })));
+      if (v.split_preview && SPLIT.enabled) {
+        (v.split_preview.files || []).filter((f) => f.datasets).forEach((f) => box.appendChild(el("p", { class: "muted small",
+          text: `${f.filename} will split into: ` + f.datasets.map((x) => `${x.name} (${x.rows == null ? "—" : x.rows} rows)`).join(", ") })));
+      }
       (v.input_files || []).forEach((f) => box.appendChild(el("p", { class: "muted small",
         text: `${f.filename}: ${f.row_count} rows, header on row ${f.detected_header_row}` })));
     } catch (e) { box.innerHTML = "<div class='errbox'>" + e.message + "</div>"; }
@@ -275,11 +353,11 @@
 
   // ---- step 3: run
   async function runCalc() {
-    if (!PICK.size) { setStep(2); return toast("Select files first", "err"); }
+    if (!PICK.size) { setStep(3); return toast("Select files first", "err"); }
     $("#run-status").textContent = "Running the Dataiku recipe… this can take a while.";
     $("#run-result").innerHTML = "";
     try {
-      const r = await call("/api/run", { method: "POST", json: { category: CUR.key, selected_paths: [...PICK] } });
+      const r = await call("/api/run", { method: "POST", json: { category: CUR.key, selected_paths: [...PICK], split: splitPayload() } });
       const s = D(r);
       $("#run-status").innerHTML = "<span class='pill ok'>" + (s.status || "COMPLETED") + "</span>";
       const box = $("#run-result");
@@ -290,6 +368,16 @@
         el("dt", { text: "Started" }), el("dd", { text: when(s.started_at) }),
         el("dt", { text: "Completed" }), el("dd", { text: when(s.completed_at) }),
       ]));
+      if (s.split && (s.split.datasets || []).length) {
+        box.appendChild(el("h3", { text: `Split into ${s.split.datasets.length} dataset(s)`, style: "margin-top:14px;font-size:14px" }));
+        const tb = el("tbody", {});
+        s.split.datasets.forEach((d) => tb.appendChild(el("tr", {}, [
+          el("td", { text: d.source_filename }), el("td", { text: d.split_name }),
+          el("td", { class: "muted small", text: `${d.column} = ${d.value}` }), el("td", { class: "num", text: d.row_count })])));
+        box.appendChild(el("div", { class: "table-wrap" }, [el("table", {}, [
+          el("thead", {}, [el("tr", {}, ["Source file", "Dataset", "Filter", "Rows"].map((h) => el("th", { text: h })))]), tb])]));
+        (s.split.skipped || []).forEach((m) => box.appendChild(el("div", { class: "warnbox", text: "⚠ " + m })));
+      }
       const pf = s.produced_files || [];
       if (pf.length) {
         box.appendChild(el("h3", { text: "Produced files", style: "margin-top:14px;font-size:14px" }));
@@ -387,7 +475,7 @@
         el("button", { class: "btn small", text: "Trace mismatched rows →", onclick: async () => {
           let tf = traceFiles();
           if (!tf.files.length) { await refreshOutputs(); tf = traceFiles(); }
-          if (!tf.files.length) { setStep(4); return toast("No formula workbook to trace — run the calculation first", "err"); }
+          if (!tf.files.length) { setStep(5); return toast("No formula workbook to trace — run the calculation first", "err"); }
           go(`#/c/${encodeURIComponent(CUR.key)}/trace?folder=${tf.which}&file=${encodeURIComponent(tf.files[0].path)}`);
         } }),
       ]));
@@ -845,11 +933,14 @@
     $("#mapping-upload").addEventListener("click", uploadMapping);
     $("#clear-data").addEventListener("click", clearData);
 
-    $("#to-validate").addEventListener("click", () => setStep(2));
+    $("#to-split").addEventListener("click", () => setStep(2));
+    $("#split-enabled").addEventListener("change", (e) => { SPLIT.enabled = e.target.value === "yes"; renderSplit(); });
+    $("#split-preview").addEventListener("click", previewSplit);
+    $("#split-reset").addEventListener("click", () => { SPLIT.rules = SPLIT.defaults.map((r) => Object.assign({}, r)); drawSplitRules(); $("#split-preview-result").innerHTML = ""; });
     $("#pick-all").addEventListener("click", () => { DATA_FILES.forEach((f) => PICK.add(f.path)); renderPick(); });
     $("#pick-none").addEventListener("click", () => { PICK.clear(); renderPick(); });
     $("#run-validate").addEventListener("click", runValidate);
-    $("#to-run").addEventListener("click", () => setStep(3));
+    $("#to-run").addEventListener("click", () => setStep(4));
     $("#run-go").addEventListener("click", runCalc);
     $("#cmp-add").addEventListener("click", () => { CMP_CONFIG.rows.push({ left: "", right: "", type: "numeric" }); renderCompare(); });
     $("#cmp-run").addEventListener("click", runCompare);

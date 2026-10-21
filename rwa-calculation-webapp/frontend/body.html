@@ -31,11 +31,12 @@
 
       <ol class="stepper" id="stepper">
         <li data-step="1" class="active">Data files</li>
-        <li data-step="2">Select &amp; validate</li>
-        <li data-step="3">Run</li>
-        <li data-step="4">Outputs</li>
-        <li data-step="5">Compare</li>
-        <li data-step="6">Trace</li>
+        <li data-step="2">Split</li>
+        <li data-step="3">Select &amp; validate</li>
+        <li data-step="4">Run</li>
+        <li data-step="5">Outputs</li>
+        <li data-step="6">Compare</li>
+        <li data-step="7">Trace</li>
       </ol>
 
       <!-- step 1: data + mapping upload -->
@@ -59,12 +60,36 @@
 
         <div class="row-actions">
           <button class="btn ghost danger" id="clear-data">Clear all data files</button>
-          <button class="btn" id="to-validate">Select &amp; validate &rarr;</button>
+          <button class="btn" id="to-split">Split data &rarr;</button>
         </div>
       </div>
 
-      <!-- step 2: select + validate -->
+      <!-- step 2: split -->
       <div class="step-panel hidden" id="step-2">
+        <h3>Split the data into datasets</h3>
+        <p class="muted small">Optionally split every selected input file into filtered datasets &mdash; one workbook (one sheet)
+          each. With two input files and three rules you get six datasets, and each is processed on its own.
+          Pick the column and the value to keep for each dataset; the defaults are pre-filled and can be changed.</p>
+        <div class="split-toggle">
+          <label class="inline-field"><span>Split data?</span>
+            <select id="split-enabled"><option value="no">No</option><option value="yes">Yes</option></select></label>
+        </div>
+        <div id="split-body" class="hidden">
+          <div id="split-rules"></div>
+          <div class="row-actions" style="justify-content:flex-start;margin-top:4px">
+            <button class="btn ghost small" id="split-preview">Preview row counts</button>
+            <button class="btn ghost small" id="split-reset">Reset to defaults</button>
+          </div>
+          <div id="split-preview-result"></div>
+        </div>
+        <div class="row-actions">
+          <button class="btn ghost" data-goto="1">&larr; Back</button>
+          <button class="btn" data-goto="3">Select &amp; validate &rarr;</button>
+        </div>
+      </div>
+
+      <!-- step 3: select + validate -->
+      <div class="step-panel hidden" id="step-3">
         <h3>Choose the files to process</h3>
         <div class="pick-list" id="pick-list"></div>
         <div class="row-actions" style="justify-content:flex-start">
@@ -74,26 +99,26 @@
         </div>
         <div id="validate-result"></div>
         <div class="row-actions">
-          <button class="btn ghost" data-goto="1">&larr; Back</button>
+          <button class="btn ghost" data-goto="2">&larr; Back</button>
           <button class="btn" id="to-run">Continue to run &rarr;</button>
         </div>
       </div>
 
       <!-- step 3: run -->
-      <div class="step-panel hidden" id="step-3">
+      <div class="step-panel hidden" id="step-4">
         <h3>Run the calculation recipe</h3>
         <p class="muted small" id="run-recipe-line"></p>
         <div id="run-status" class="muted">Ready.</div>
         <div id="run-result"></div>
         <div class="row-actions">
-          <button class="btn ghost" data-goto="2">&larr; Back</button>
+          <button class="btn ghost" data-goto="3">&larr; Back</button>
           <button class="btn" id="run-go">Run calculation</button>
-          <button class="btn" data-goto="4">See outputs &rarr;</button>
+          <button class="btn" data-goto="5">See outputs &rarr;</button>
         </div>
       </div>
 
       <!-- step 4: outputs -->
-      <div class="step-panel hidden" id="step-4">
+      <div class="step-panel hidden" id="step-5">
         <div class="output-cols">
           <div class="output-card">
             <h3>Output files</h3>
@@ -105,13 +130,13 @@
           </div>
         </div>
         <div class="row-actions">
-          <button class="btn ghost" data-goto="3">&larr; Back</button>
-          <button class="btn" data-goto="5">Compare &rarr;</button>
+          <button class="btn ghost" data-goto="4">&larr; Back</button>
+          <button class="btn" data-goto="6">Compare &rarr;</button>
         </div>
       </div>
 
       <!-- step 5: compare -->
-      <div class="step-panel hidden" id="step-5">
+      <div class="step-panel hidden" id="step-6">
         <h3>Compare columns across every output file</h3>
         <p class="muted small">Pick a left and a right column and how to compare them. A row is a mismatch if any pair disagrees.</p>
         <div id="cmp-rows"></div>
@@ -122,13 +147,13 @@
         </div>
         <div id="cmp-result"></div>
         <div class="row-actions">
-          <button class="btn ghost" data-goto="4">&larr; Back</button>
-          <button class="btn" data-goto="6">Open trace &rarr;</button>
+          <button class="btn ghost" data-goto="5">&larr; Back</button>
+          <button class="btn" data-goto="7">Open trace &rarr;</button>
         </div>
       </div>
 
       <!-- step 6: trace launcher -->
-      <div class="step-panel hidden" id="step-6">
+      <div class="step-panel hidden" id="step-7">
         <h3>Deep formula trace</h3>
         <p class="muted small">Open a produced workbook and walk any row's calculations node by node &mdash; every computed
           column, the branch each <span class="mono">IF</span> takes, what each <span class="mono">VLOOKUP</span> matched,

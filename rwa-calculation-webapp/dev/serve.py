@@ -85,6 +85,12 @@ def categories():
             "output_file_count": len(FILES.get((key, "output"), [])),
             "template_file_count": len(FILES.get((key, "template"), [])),
             "status": _status(key),
+            "split_enabled": False,
+            "split_rules": [
+                {"name": "COLLATERIZED", "column": "TRANCHE_COLLATERAL_TYPE", "value": "COLLATERIZED"},
+                {"name": "NOT COLLATERIZED", "column": "TRANCHE_COLLATERAL_TYPE", "value": "NOT COLLATERIZED"},
+                {"name": "GUARANTEED", "column": "TRANCHE_GUARANTEE_TYPE", "value": "GUARANTEED"},
+            ],
         })
     return ok({"app_title": "RWA Calculation", "categories": out})
 
@@ -124,6 +130,21 @@ def download():
     return Response(b"mock file", headers={"Content-Disposition": 'attachment; filename="mock.bin"'})
 
 
+SPLIT_COLUMNS = ["ID", "EXPOSURE", "TRANCHE_COLLATERAL_TYPE", "TRANCHE_GUARANTEE_TYPE", "RATING"]
+
+
+@app.route("/api/split-preview", methods=["POST"])
+def split_preview():
+    b = request.get_json(force=True)
+    paths = b.get("selected_paths") or [f["path"] for f in FILES.get((b["category"], "data"), [])]
+    rules = b.get("rules") or []
+    files = [{"filename": p.lstrip("/"), "rows": 1284,
+              "datasets": [{"name": r["name"], "rows": None if r["column"] not in SPLIT_COLUMNS else 300 + 17 * i}
+                           for i, r in enumerate(rules)]} for p in paths]
+    return ok({"columns": SPLIT_COLUMNS, "files": files, "rules_error": None,
+               "missing_columns": sorted({r["column"] for r in rules if r["column"] not in SPLIT_COLUMNS})})
+
+
 @app.route("/api/validate-inputs", methods=["POST"])
 def validate():
     b = request.get_json(force=True)
@@ -149,6 +170,11 @@ def run():
         "output_file": "Corporate_RWA_20260902_084500.xlsx",
         "produced_files": [{"filename": "Corporate_RWA_20260902_084500.xlsx"}],
         "execution": {"state": "COMPLETED"},
+        "split": None if not (b.get("split") or {}).get("enabled") else {
+            "datasets": [{"source_filename": p.lstrip("/"), "split_name": r["name"], "column": r["column"],
+                          "value": r["value"], "row_count": 321}
+                         for p in b.get("selected_paths", []) for r in b["split"]["rules"]],
+            "skipped": []},
     }, "Recipe completed.")
 
 
